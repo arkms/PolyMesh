@@ -111,6 +111,24 @@ public class PolyMeshEditor : Editor
 				polyMesh.BuildMesh();
 			}
 			EditorGUILayout.EndHorizontal();
+            if (polyMesh)
+            {
+                if (GUILayout.Button("Save Mesh"))
+                {
+                    RecordUndo();
+                    Mesh mesh = polyMesh.GetComponent<MeshFilter>().sharedMesh;
+                    string path = EditorUtility.SaveFilePanel("Save Separate Mesh Asset", "Assets/", polyMesh.gameObject.name, "asset");
+                    if (string.IsNullOrEmpty(path)) return;
+
+                    path = FileUtil.GetProjectRelativePath(path);
+
+                    Mesh meshToSave = Object.Instantiate(mesh) as Mesh;
+                    AssetDatabase.CreateAsset(meshToSave, path);
+                    polyMesh.GetComponent<MeshFilter>().sharedMesh = meshToSave;
+                    polyMesh.BuildMesh();
+                    AssetDatabase.SaveAssets();
+                }
+            }
 		}
 
 		//Create collider
@@ -150,7 +168,7 @@ public class PolyMeshEditor : Editor
 					GameObject obj;
 					if (buildColliderPolygonCollider)
                     {
-						obj = new GameObject("Collider", typeof(PolygonCollider2D));
+						obj = new GameObject("Collider2D", typeof(PolygonCollider2D));
 						polyMesh.polyCollider = obj.GetComponent<PolygonCollider2D>();
 					}
                     else
@@ -162,7 +180,7 @@ public class PolyMeshEditor : Editor
 					var obj = new GameObject("Collider", typeof(MeshCollider));
 					polyMesh.meshCollider = obj.GetComponent<MeshCollider>();
 #endif
-					obj.transform.parent = polyMesh.transform;
+                    obj.transform.parent = polyMesh.transform;
 					obj.transform.localPosition = Vector3.zero;
 				}
 			}
@@ -171,18 +189,67 @@ public class PolyMeshEditor : Editor
 				RecordDeepUndo();
 				if (polyMesh.meshCollider)
                 {
-					DestroyImmediate(polyMesh.meshCollider.gameObject);
+                    //destroy GameObject with collider and asset
+                    string path = AssetDatabase.GetAssetOrScenePath(polyMesh.meshCollider.sharedMesh);
+                    DestroyImmediate(polyMesh.meshCollider.gameObject);
+                    AssetDatabase.DeleteAsset(path);
 				}
+#if !UNITY_4_2_OR_LOWER
                 else if (polyMesh.polyCollider)
                 {
 					DestroyImmediate(polyMesh.polyCollider.gameObject);
 			    }
+#endif
 			}
 		}
 
 		//Update mesh
 		if (GUI.changed)
-			polyMesh.BuildMesh();
+        {
+            polyMesh.BuildMesh();
+
+#if !UNITY_4_2_OR_LOWER
+            if (!polyMesh.buildColliderPolygonCollider)
+            {
+#endif
+                if(polyMesh.meshCollider != null)
+                {
+                    //check if collider mesh is saved
+                    string path = AssetDatabase.GetAssetOrScenePath(polyMesh.meshCollider);
+                    if (string.IsNullOrEmpty(path) || path.EndsWith(".unity"))
+                    {
+                        //saved it
+                        RecordUndo();
+                        Mesh mesh = polyMesh.meshCollider.sharedMesh;
+                        string path2Save = EditorUtility.SaveFilePanel("Save Separate MeshCollider Asset", "Assets/", polyMesh.GetComponent<MeshFilter>().sharedMesh.name + "_col", "asset");
+                        if (string.IsNullOrEmpty(path2Save)) //destroy collider
+                        {
+                            DestroyImmediate(polyMesh.meshCollider.gameObject);
+                            polyMesh.meshCollider = null;
+                        }
+                        else
+                        {
+                            path2Save = FileUtil.GetProjectRelativePath(path2Save);
+
+                            Mesh meshToSave = Object.Instantiate(mesh) as Mesh;
+                            //create uv or unity show a message
+                            Vector2[] uvs = new Vector2[meshToSave.vertexCount];
+                            for (int i = 0; i < uvs.Length; i++)
+                            {
+                                uvs[i] = new Vector2(meshToSave.vertices[i].x, meshToSave.vertices[i].z);
+                            }
+                            meshToSave.uv = uvs;
+                            //save new mesh for collider
+                            AssetDatabase.CreateAsset(meshToSave, path2Save);
+                            polyMesh.meshCollider.sharedMesh = meshToSave;
+                            AssetDatabase.SaveAssets();
+                        }
+                    }
+                }
+#if !UNITY_4_2_OR_LOWER
+            }
+#endif
+        }
 
 		//Editor settings
 		if (editorSettings = EditorGUILayout.Foldout(editorSettings, "Editor"))
